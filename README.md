@@ -124,9 +124,7 @@ Parameters:
 
 ## License
 
-Licensed under the CC BY-NC-SA 4.0 (Attribution-NonCommercial-ShareAlike 4.0 International)
-
-The code is released for academic research use only. 
+Licensed under the Apache-2.0 license.
 
 If you have any questions, please contact me via [imlixinyang@gmail.com](mailto:imlixinyang@gmail.com). 
 
