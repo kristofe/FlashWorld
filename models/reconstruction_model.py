@@ -117,11 +117,8 @@ class WANDecoderPixelAligned3DGSReconstructionModel(nn.Module):
         return x
 
     def forward(self, feats, z, cameras):
-
         x = self.decode(feats, z).squeeze(2)
-
         gaussian_params = self.gs_head(x, cameras.flatten(0, 1)).unflatten(0, (cameras.shape[0], cameras.shape[1]))
-        
         return gaussian_params
     
     # def forward(self, images, cameras, scene_chunk_lens):
@@ -132,7 +129,6 @@ class WANDecoderPixelAligned3DGSReconstructionModel(nn.Module):
     
     @torch.amp.autocast(device_type='cuda', enabled=False)
     def render(self, gaussian_params, camerass, height, width, bg_mode='random'):
-
         camerass = camerass.to(torch.float32)
 
         test_c2ws = torch.eye(4, device=camerass.device)[None][None].repeat(camerass.shape[0], camerass.shape[1], 1, 1).float()
@@ -214,7 +210,6 @@ class PixelAligned3DGS(nn.Module):
 
     @torch.amp.autocast(device_type='cuda', enabled=False)
     def forward(self, x, cameras):
-
         BN, _, h, w = x.shape
 
         local_gaussian_params = F.conv2d(x, self.gs_proj.weight * self.lrs_mul[:, None, None, None].to(x.dtype), self.gs_proj.bias * self.lrs_mul.to(x.dtype), stride=1, padding=1).unflatten(1, (self.num_points_per_pixel, -1))
@@ -253,9 +248,8 @@ class PixelAligned3DGS(nn.Module):
         scales = (torch.sigmoid(scales) * (self.scale_range[1] - self.scale_range[0]) + self.scale_range[0]) * pixel_size
         # scales = F.softplus(scales, beta=1)
 
-        # It’s not required to be normalized for gspalt rasterization?
+        # It's not required to be normalized for gspalt rasterization?
         rotations = torch.nn.functional.normalize(rotations, dim=-1)
 
         gaussian_params = torch.cat([xyz, opacity, scales, rotations, features], dim=-1)
-    
         return gaussian_params

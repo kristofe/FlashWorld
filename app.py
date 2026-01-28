@@ -268,8 +268,8 @@ class GenerationSystem(nn.Module):
 
         if need_3d_mode:
             scene_params = self.recon_decoder(
-                                einops.rearrange(feats, 'B C T H W -> (B T) C H W').unsqueeze(2).to(self.device if not self.offload_vae else "cpu").to(torch.bfloat16), 
-                                einops.rearrange(self.latent_unscale_fn(latents_pred_2d.detach()), 'B C T H W -> (B T) C H W').unsqueeze(2).to(self.device if not self.offload_vae else "cpu").to(torch.bfloat16), 
+                                einops.rearrange(feats, 'B C T H W -> (B T) C H W').unsqueeze(2).to(self.device if not self.offload_vae else "cpu").to(torch.bfloat16),
+                                einops.rearrange(self.latent_unscale_fn(latents_pred_2d.detach()), 'B C T H W -> (B T) C H W').unsqueeze(2).to(self.device if not self.offload_vae else "cpu").to(torch.bfloat16),
                                 cameras.to(self.device if not self.offload_vae else "cpu").float()
                             ).flatten(1, -2).to(self.device).float()
 

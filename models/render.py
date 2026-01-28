@@ -15,7 +15,7 @@ modified from https://github.com/arthurhero/Long-LRM/blob/main/model/llrm.py
 """
 class GaussianRendererWithCheckpoint(torch.autograd.Function):
     @staticmethod
-    def render(xyz, feature, scale, rotation, opacity, test_c2w, test_intr, 
+    def render(xyz, feature, scale, rotation, opacity, test_c2w, test_intr,
                W, H, sh_degree, near_plane, far_plane, backgrounds):
         test_w2c = test_c2w.float().inverse().unsqueeze(0) # (1, 4, 4)
         test_intr_i = torch.zeros(3, 3).to(test_intr.device)
@@ -25,13 +25,20 @@ class GaussianRendererWithCheckpoint(torch.autograd.Function):
         test_intr_i[1, 2] = test_intr[3]
         test_intr_i[2, 2] = 1
         test_intr_i = test_intr_i.unsqueeze(0) # (1, 3, 3)
+
+        # Note: For RGB+D render mode, we don't pass backgrounds directly to gsplat's
+        # rasterization due to a compatibility issue where gsplat expects backgrounds
+        # to match the output channel count (4 for RGB+D), but the backgrounds tensor
+        # only has 3 channels (RGB). Instead, we apply the background manually after
+        # rasterization using alpha compositing.
         rendering, alpha, _ = rasterization(xyz, rotation, scale, opacity, feature,
-                                        test_w2c, test_intr_i, W, H, sh_degree=sh_degree, 
+                                        test_w2c, test_intr_i, W, H, sh_degree=sh_degree,
                                         near_plane=near_plane, far_plane=far_plane,
                                         render_mode="RGB+D",
-                                        backgrounds=backgrounds[None],
-                                        rasterize_mode='classic') # (1, H, W, 4) 
-        # rendering[..., 3:] = rendering[..., 3:] + far_plane * (1 - alpha)
+                                        rasterize_mode='classic') # (1, H, W, 4)
+
+        # Apply background color to RGB channels using alpha compositing
+        rendering[..., :3] = rendering[..., :3] + (1 - alpha) * backgrounds[None, None, None, :]
         return rendering
 
     @staticmethod
@@ -48,7 +55,7 @@ class GaussianRendererWithCheckpoint(torch.autograd.Function):
             renderings = torch.zeros(V, H, W, 4).to(xyz.device)
             alphas = torch.rand(V, device=xyz.device)
             for iv in range(V):
-                rendering = GaussianRendererWithCheckpoint.render(xyz, feature, scale, rotation, opacity, 
+                rendering = GaussianRendererWithCheckpoint.render(xyz, feature, scale, rotation, opacity,
                                                                       test_c2ws[iv], test_intr[iv], W, H, sh_degree, near_plane, far_plane, backgrounds[iv])
                 renderings[iv:iv+1] = rendering
 
@@ -71,7 +78,7 @@ class GaussianRendererWithCheckpoint(torch.autograd.Function):
         with torch.enable_grad():
             V, _ = test_intr.shape
             for iv in range(V):
-                rendering = GaussianRendererWithCheckpoint.render(xyz, feature, scale, rotation, opacity, 
+                rendering = GaussianRendererWithCheckpoint.render(xyz, feature, scale, rotation, opacity,
                                                         test_c2ws[iv], test_intr[iv], W, H, sh_degree, near_plane, far_plane, backgrounds[iv])
                 rendering.backward(grad_output[iv:iv+1])
 
@@ -82,12 +89,12 @@ def gaussian_render(gaussian_params, test_c2ws, test_intr, W, H, near_plane=0.01
     if not torch.is_grad_enabled():
         use_checkpoint = False
 
-     # opengl2colmap, see https://github.com/imlixinyang/Director3D/blob/main/modules/renderers/gaussians_renderer.py
+    # opengl2colmap, see https://github.com/imlixinyang/Director3D/blob/main/modules/renderers/gaussians_renderer.py
     test_c2ws[:, :, :3, 1:3] *= -1
 
     device = test_intr.device
     B, V, _ = test_intr.shape
-    
+
     renderings = []
 
     for ib in range(B):
@@ -99,40 +106,22 @@ def gaussian_render(gaussian_params, test_c2ws, test_intr, W, H, near_plane=0.01
             backgrounds = torch.zeros(V, 3).to(device)
         else:
             raise ValueError(f"Invalid background mode: {bg_mode}")
-            
+
         xyz_i, opacity_i, scale_i, rotation_i, feature_i = gaussian_params[ib].float().split([3, 1, 3, 4, (sh_degree + 1)**2 * 3], dim=-1)
 
         opacity_i = opacity_i.squeeze(-1)
         feature_i = feature_i.reshape(-1, (sh_degree + 1)**2, 3)
 
         if use_checkpoint:
-            
             renderings.append(GaussianRendererWithCheckpoint.apply(xyz_i, feature_i, scale_i, rotation_i, opacity_i, test_c2ws[ib], test_intr[ib], W, H, sh_degree, near_plane, far_plane, backgrounds))
-
         else:
             rendering = torch.zeros(V, H, W, 4).to(device)
             for iv in range(V):
-                rendering[iv:iv+1] = GaussianRendererWithCheckpoint.render(xyz_i, feature_i, scale_i, rotation_i, opacity_i, 
+                rendering[iv:iv+1] = GaussianRendererWithCheckpoint.render(xyz_i, feature_i, scale_i, rotation_i, opacity_i,
                                                                       test_c2ws[ib][iv], test_intr[ib][iv], W, H, sh_degree, near_plane, far_plane, backgrounds[iv])
-
-            # test_w2c_i = test_c2ws[ib].float().inverse() # (V, 4, 4)
-            # test_intr_i = torch.zeros(V, 3, 3).to(device)
-            # test_intr_i[:, 0, 0] = test_intr[ib, :, 0]
-            # test_intr_i[:, 1, 1] = test_intr[ib, :, 1]
-            # test_intr_i[:, 0, 2] = test_intr[ib, :, 2]
-            # test_intr_i[:, 1, 2] = test_intr[ib, :, 3]
-            # test_intr_i[:, 2, 2] = 1
-
-            # # print(backgrounds.shape)
-            # rendering, _, _ = rasterization(xyz_i, rotation_i, scale_i, opacity_i, feature_i,
-            #                                     test_w2c_i, test_intr_i, W, H, sh_degree=sh_degree, 
-            #                                     near_plane=near_plane, far_plane=far_plane,
-            #                                     render_mode="RGB+D",
-            #                                     backgrounds=backgrounds,
-            #                                     rasterize_mode='classic') # (V, H, W, 3) 
             renderings.append(rendering)
-    
-    renderings = torch.stack(renderings, dim=0).permute(0, 1, 4, 2, 3).contiguous() # (B, 3, V, H, W)
+
+    renderings = torch.stack(renderings, dim=0).permute(0, 1, 4, 2, 3).contiguous() # (B, V, C, H, W)
     rgb = renderings[:, :, :3].mul_(2).add_(-1).clamp(-1, 1)
     depth = renderings[:, :, 3:]
     return rgb, depth
