@@ -129,7 +129,12 @@ class WANDecoderPixelAligned3DGSReconstructionModel(nn.Module):
     
     @torch.amp.autocast(device_type='cuda', enabled=False)
     def render(self, gaussian_params, camerass, height, width, bg_mode='random'):
-        camerass = camerass.to(torch.float32)
+        # Get device from gaussian_params (could be tensor or tuple/list of tensors)
+        if isinstance(gaussian_params, (tuple, list)):
+            device = gaussian_params[0].device
+        else:
+            device = gaussian_params.device
+        camerass = camerass.to(device=device, dtype=torch.float32)
 
         test_c2ws = torch.eye(4, device=camerass.device)[None][None].repeat(camerass.shape[0], camerass.shape[1], 1, 1).float()
         test_c2ws[:, :, :3, :3] = quaternion_to_matrix(camerass[:, :, :4])
@@ -215,7 +220,7 @@ class PixelAligned3DGS(nn.Module):
         local_gaussian_params = F.conv2d(x, self.gs_proj.weight * self.lrs_mul[:, None, None, None].to(x.dtype), self.gs_proj.bias * self.lrs_mul.to(x.dtype), stride=1, padding=1).unflatten(1, (self.num_points_per_pixel, -1))
 
         local_gaussian_params = local_gaussian_params.to(torch.float32)
-        cameras = cameras.to(torch.float32)
+        cameras = cameras.to(device=x.device, dtype=torch.float32)
         # local_gaussian_params = F.conv2d(x, self.gs_proj.weight, self.gs_proj.bias, stride=1, padding=1).unflatten(1, (self.num_points_per_pixel, -1))
 
         # batch * n_frame, num_points_per_pixel, c, h, w -> batch * n_frame, num_points_per_pixel, h, w, c
